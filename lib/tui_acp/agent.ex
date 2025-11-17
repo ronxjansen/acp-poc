@@ -149,7 +149,7 @@ defmodule TuiAcp.Agent do
     run_agent_loop(session_id, context, state, 0, max_turns)
   end
 
-  defp run_agent_loop(session_id, context, state, current_turn, max_turns)
+  defp run_agent_loop(_session_id, context, _state, current_turn, max_turns)
        when current_turn >= max_turns do
     content = ReqLLM.Response.text(List.last(context.messages)) || "Max turns reached."
     {:ok, context, content}
@@ -172,7 +172,9 @@ defmodule TuiAcp.Agent do
               {:error, reason}
           end
         else
-          content = ReqLLM.Response.text(response) || "I apologize, but I couldn't generate a response."
+          content =
+            ReqLLM.Response.text(response) || "I apologize, but I couldn't generate a response."
+
           {:ok, response.context, content}
         end
 
@@ -283,10 +285,12 @@ defmodule TuiAcp.Agent do
   defp execute_tool_safely(session_id, tool, tool_call, state) do
     input = ReqLLM.ToolCall.args_map(tool_call) || %{}
 
-    send_tool_notification(session_id, tool.name, input, state)
+    # send_tool_notification(session_id, tool.name, input, state)
 
     case ReqLLM.Tool.execute(tool, input) do
       {:ok, result} ->
+        # send_tool_result_notification(session_id, tool.name, result, state)
+
         # Encode result as JSON string
         result_json = Jason.encode!(result)
 
@@ -314,12 +318,42 @@ defmodule TuiAcp.Agent do
   defp send_tool_notification(session_id, tool_name, args, state) do
     Logger.info("Executing tool: #{tool_name} with args: #{inspect(args)}")
 
+    # Format tool call info as text with proper spacing
+    args_str = Jason.encode!(args, pretty: true)
+    tool_text = "\n🔧 Using tool: #{tool_name}\nArguments:\n#{args_str}\n"
+
     update = %{
       type: "agent_message_chunk",
       content: %{
-        type: "tool_use",
-        tool_name: tool_name,
-        tool_args: args
+        type: "text",
+        text: tool_text
+      }
+    }
+
+    params = %{
+      session_id: session_id,
+      update: update
+    }
+
+    if state.notification_callback do
+      state.notification_callback.("session/update", params)
+    else
+      send(TuiAcp.Server, {:send_notification, "session/update", params})
+    end
+  end
+
+  defp send_tool_result_notification(session_id, tool_name, result, state) do
+    Logger.info("Tool #{tool_name} completed with result: #{inspect(result)}")
+
+    # Format tool result as text with proper spacing
+    result_str = Jason.encode!(result, pretty: true)
+    tool_text = "\n✅ Tool result: #{tool_name}\n#{result_str}\n\n"
+
+    update = %{
+      type: "agent_message_chunk",
+      content: %{
+        type: "text",
+        text: tool_text
       }
     }
 

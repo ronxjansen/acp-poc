@@ -131,6 +131,23 @@ func (c *ACPClient) handleMessageChunk(ctx context.Context, content *acp.Content
 	return nil
 }
 
+// handleToolMessageChunk processes tool-related message chunks with special formatting
+func (c *ACPClient) handleToolMessageChunk(ctx context.Context, content *acp.ContentBlock) error {
+	if content == nil || content.Text == nil {
+		return nil
+	}
+
+	textChunk := content.Text.Text
+	c.logger.Info("Received tool message chunk: %s", textChunk)
+
+	// For now, just pass it through as a regular message
+	// The formatting from the agent already has emojis and structure
+	if c.handler != nil {
+		return c.handler.OnMessageChunk(ctx, textChunk)
+	}
+	return nil
+}
+
 func (c *ACPClient) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
 	u := n.Update
 
