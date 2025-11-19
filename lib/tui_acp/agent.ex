@@ -10,7 +10,8 @@ defmodule TuiAcp.Agent do
   def init(args) do
     state = %{
       sessions: %{},
-      notification_callback: Keyword.get(args, :notification_callback)
+      notification_callback: Keyword.get(args, :notification_callback),
+      request_callback: Keyword.get(args, :request_callback)
     }
 
     {:ok, state}
@@ -34,7 +35,13 @@ defmodule TuiAcp.Agent do
     session_id = generate_session_id()
 
     system_message =
-      "You are a helpful weather assistant. Use the provided tools to get weather information when users ask about weather. Always be specific about locations and provide detailed, friendly responses."
+      "You are a helpful AI assistant with access to various tools. You can:
+      - Get weather information using get_current_weather and get_forecast tools
+      - Read files from the user's filesystem using the read_file tool
+      - Write files to the user's filesystem using the write_file tool
+      - Search for text patterns in files using the grep_search tool
+
+      When users ask about weather, use the weather tools. When they ask about files or need to work with the filesystem, use the file tools. When they need to search for text or patterns across files, use the grep_search tool. Always be specific and provide detailed, friendly responses."
 
     session_state = %{
       id: session_id,
@@ -226,6 +233,59 @@ defmodule TuiAcp.Agent do
           ]
         ],
         callback: {__MODULE__, :execute_forecast_tool, []}
+      ),
+      ReqLLM.Tool.new!(
+        name: "read_file",
+        description: "Read the contents of a text file from the filesystem",
+        parameter_schema: [
+          path: [
+            type: :string,
+            required: true,
+            doc: "The absolute or relative path to the file to read"
+          ]
+        ],
+        callback: {__MODULE__, :execute_read_file_tool, []}
+      ),
+      ReqLLM.Tool.new!(
+        name: "write_file",
+        description: "Write content to a text file on the filesystem",
+        parameter_schema: [
+          path: [
+            type: :string,
+            required: true,
+            doc: "The absolute or relative path to the file to write"
+          ],
+          content: [
+            type: :string,
+            required: true,
+            doc: "The content to write to the file"
+          ]
+        ],
+        callback: {__MODULE__, :execute_write_file_tool, []}
+      ),
+      ReqLLM.Tool.new!(
+        name: "grep_search",
+        description: "Search for a pattern in files using grep-like functionality. Returns matching lines with file paths and line numbers.",
+        parameter_schema: [
+          pattern: [
+            type: :string,
+            required: true,
+            doc: "The search pattern or text to find in files"
+          ],
+          path: [
+            type: :string,
+            doc: "The directory or file path to search in (defaults to current directory)"
+          ],
+          case_sensitive: [
+            type: :boolean,
+            doc: "Whether the search should be case-sensitive (defaults to false)"
+          ],
+          file_pattern: [
+            type: :string,
+            doc: "Glob pattern to filter files (e.g., '*.ex' for Elixir files, '*.{ex,exs}' for multiple extensions)"
+          ]
+        ],
+        callback: {__MODULE__, :execute_grep_search_tool, []}
       )
     ]
   end
@@ -286,6 +346,12 @@ defmodule TuiAcp.Agent do
     input = ReqLLM.ToolCall.args_map(tool_call) || %{}
 
     # send_tool_notification(session_id, tool.name, input, state)
+
+    # For client request tools, we need to pass the request_callback
+    # Store it in the process dictionary so tools can access it
+    if state.request_callback do
+      Process.put(:request_callback, state.request_callback)
+    end
 
     case ReqLLM.Tool.execute(tool, input) do
       {:ok, result} ->
@@ -410,5 +476,90 @@ defmodule TuiAcp.Agent do
     }
 
     {:ok, result}
+  end
+
+  def execute_read_file_tool(args) do
+    path = args["path"] || args[:path]
+
+    Logger.info("Reading file: #{path}")
+
+    # Get the request callback from process dictionary
+    request_callback = Process.get(:request_callback)
+
+    if request_callback do
+      case TuiAcp.ClientRequest.read_file(request_callback, path) do
+        {:ok, content} ->
+          {:ok, %{
+            path: path,
+            content: content,
+            size: byte_size(content)
+          }}
+
+        {:error, reason} ->
+          {:error, "Failed to read file: #{inspect(reason)}"}
+      end
+    else
+      {:error, "Client request capability not available"}
+    end
+  end
+
+  def execute_write_file_tool(args) do
+    path = args["path"] || args[:path]
+    content = args["content"] || args[:content]
+
+    Logger.info("Writing file: #{path}")
+
+    # Get the request callback from process dictionary
+    request_callback = Process.get(:request_callback)
+
+    if request_callback do
+      case TuiAcp.ClientRequest.write_file(request_callback, path, content) do
+        :ok ->
+          {:ok, %{
+            path: path,
+            bytes_written: byte_size(content),
+            status: "success"
+          }}
+
+        {:error, reason} ->
+          {:error, "Failed to write file: #{inspect(reason)}"}
+      end
+    else
+      {:error, "Client request capability not available"}
+    end
+  end
+
+  def execute_grep_search_tool(args) do
+    pattern = args["pattern"] || args[:pattern]
+    path = args["path"] || args[:path]
+    case_sensitive = args["case_sensitive"] || args[:case_sensitive]
+    file_pattern = args["file_pattern"] || args[:file_pattern]
+
+    Logger.info("Searching for pattern: #{pattern} in path: #{path || "."}")
+
+    # Get the request callback from process dictionary
+    request_callback = Process.get(:request_callback)
+
+    if request_callback do
+      opts = [pattern: pattern]
+      opts = if path, do: Keyword.put(opts, :path, path), else: opts
+      opts = if case_sensitive, do: Keyword.put(opts, :case_sensitive, case_sensitive), else: opts
+      opts = if file_pattern, do: Keyword.put(opts, :file_pattern, file_pattern), else: opts
+
+      case TuiAcp.ClientRequest.grep_search(request_callback, opts) do
+        {:ok, matches} ->
+          {:ok, %{
+            pattern: pattern,
+            path: path || ".",
+            matches: matches,
+            count: length(matches)
+          }}
+
+        {:error, reason} ->
+          {:error, "Failed to perform grep search: #{inspect(reason)}"}
+      end
+    else
+      {:error, "Client request capability not available"}
+    end
   end
 end

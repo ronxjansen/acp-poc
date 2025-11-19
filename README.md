@@ -39,10 +39,15 @@ An Elixir implementation of an AI agent using the Agent Client Protocol (ACP) us
 - Format: Line-delimited JSON-RPC 2.0 messages
 - The server and client run as separate, independent processes
 
-### Available Tools
+## TODO
+## v0.0.1
+- [ ] Refactor TUI and Elixir code
+- [ ] Remove debuggin info below input
+- [ ] Add dir list client capability
+- [ ] Copy code scanner prompt
+- [ ] Add git ignore support
+- [ ] Store progress & memories in GUARDASE.md
 
-1. **get_current_weather**: Get current weather conditions for a location
-   - Parameters: location (required), unit (optional: celsius/fahrenheit)
-
-2. **get_forecast**: Get multi-day weather forecast
-   - Parameters: location (required), days (required: 1-7), unit (optional)
+## v0.0.2
+- [ ] Handle reconnection logic. Client should try to reconnect if the server is down. 
+- [ ] Add MCP as client capability
