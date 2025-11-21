@@ -41,9 +41,9 @@ An Elixir implementation of an AI agent using the Agent Client Protocol (ACP) us
 
 ## TODO
 ## v0.0.1
-- [ ] Refactor TUI and Elixir code
+- [x] Refactor TUI and Elixir code
 - [x] Remove debuggin info below input
-- [ ] Add dir list client capability
+- [x] Add dir list client capability
 - [ ] Copy prompt
 
 ## v0.0.2

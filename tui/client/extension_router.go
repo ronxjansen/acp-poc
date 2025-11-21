@@ -12,31 +12,48 @@ import (
 // According to the ACP extensibility spec, method names starting with _ are reserved
 // for custom extensions.
 type ExtensionRouter struct {
-	fs     *FileSystemAdapter
-	logger logger.Logger
+	fs          *FileSystemAdapter
+	logger      logger.Logger
+	toolHandler ToolMessageHandler
 }
 
 // NewExtensionRouter creates a new extension method router
-func NewExtensionRouter(fs *FileSystemAdapter, log logger.Logger) *ExtensionRouter {
+func NewExtensionRouter(fs *FileSystemAdapter, log logger.Logger, toolHandler ToolMessageHandler) *ExtensionRouter {
 	if log == nil {
 		log = logger.NewNoopLogger()
 	}
 	return &ExtensionRouter{
-		fs:     fs,
-		logger: log,
+		fs:          fs,
+		logger:      log,
+		toolHandler: toolHandler,
 	}
 }
 
 // HandleExtensionMethod routes extension methods to their handlers
 func (r *ExtensionRouter) HandleExtensionMethod(ctx context.Context, method string, params map[string]interface{}) (interface{}, error) {
+	// Broadcast tool input
+	if r.toolHandler != nil {
+		r.toolHandler.OnToolInput(ctx, method, params)
+	}
+
+	var result interface{}
+	var err error
+
 	switch method {
 	case "_fs/grep_search":
-		return r.handleGrepSearch(ctx, params)
+		result, err = r.handleGrepSearch(ctx, params)
 	case "_fs/list_dirs":
-		return r.handleListDirs(ctx, params)
+		result, err = r.handleListDirs(ctx, params)
 	default:
-		return nil, fmt.Errorf("extension method not supported: %s", method)
+		err = fmt.Errorf("extension method not supported: %s", method)
 	}
+
+	// Broadcast tool output
+	if r.toolHandler != nil {
+		r.toolHandler.OnToolOutput(ctx, method, result, err)
+	}
+
+	return result, err
 }
 
 // handleGrepSearch handles the _fs/grep_search extension method

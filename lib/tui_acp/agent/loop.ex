@@ -29,7 +29,7 @@ defmodule TuiAcp.Agent.Loop do
 
   defp run_loop(_session_id, context, _state, current_turn, max_turns)
        when current_turn >= max_turns do
-    content = ReqLLM.Response.text(List.last(context.messages)) || "Max turns reached."
+    content = extract_text_from_message(List.last(context.messages)) || "Max turns reached."
     {:ok, context, content}
   end
 
@@ -80,4 +80,18 @@ defmodule TuiAcp.Agent.Loop do
         is_list(message.tool_calls) and length(message.tool_calls) > 0
     end
   end
+
+  # Extract text content from a Message struct
+  defp extract_text_from_message(nil), do: nil
+
+  defp extract_text_from_message(%{content: content}) when is_list(content) do
+    text =
+      content
+      |> Enum.filter(&(&1.type == :text))
+      |> Enum.map_join("", & &1.text)
+
+    if text == "", do: nil, else: text
+  end
+
+  defp extract_text_from_message(_), do: nil
 end

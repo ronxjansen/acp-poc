@@ -14,6 +14,12 @@ type MessageHandler interface {
 	OnMessageComplete(ctx context.Context) error
 }
 
+// ToolMessageHandler defines the interface for handling tool call notifications
+type ToolMessageHandler interface {
+	OnToolInput(ctx context.Context, method string, params map[string]interface{}) error
+	OnToolOutput(ctx context.Context, method string, result interface{}, err error) error
+}
+
 // GrepResult represents a single match from a grep search
 type GrepResult struct {
 	Path       string // File path
@@ -68,8 +74,12 @@ func NewACPClient(cfg Config) (*ACPClient, error) {
 	// Create capability handler
 	client.capability = NewCapabilityHandler(client.fs, cfg.Handler, cfg.Logger)
 
-	// Create extension router
-	client.extension = NewExtensionRouter(client.fs, cfg.Logger)
+	// Create extension router with optional tool message handler
+	var toolHandler ToolMessageHandler
+	if th, ok := cfg.Handler.(ToolMessageHandler); ok {
+		toolHandler = th
+	}
+	client.extension = NewExtensionRouter(client.fs, cfg.Logger, toolHandler)
 
 	// Create protocol client (this establishes the connection)
 	protocol, err := NewProtocolClient(ProtocolConfig{

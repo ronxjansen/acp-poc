@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/ron/tui_acp/tui/client"
@@ -130,6 +132,107 @@ func (a *App) OnMessageComplete(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// OnToolInput implements the ToolMessageHandler interface
+// Called when a tool is about to be executed
+func (a *App) OnToolInput(ctx context.Context, method string, params map[string]interface{}) error {
+	// Flush any pending response before showing tool call
+	a.conversation.FlushCurrentResponse()
+
+	// Format tool input message
+	content := formatToolInput(method, params)
+	a.conversation.AddMessage(Message{
+		Type:    MessageToolInput,
+		Content: content,
+		Data:    params,
+	})
+
+	if a.updateCallback != nil {
+		a.updateCallback(content)
+	}
+
+	return nil
+}
+
+// OnToolOutput implements the ToolMessageHandler interface
+// Called when a tool has finished executing
+func (a *App) OnToolOutput(ctx context.Context, method string, result interface{}, err error) error {
+	// Format tool output message
+	content := formatToolOutput(method, result, err)
+	a.conversation.AddMessage(Message{
+		Type:    MessageToolOutput,
+		Content: content,
+		Data:    result,
+	})
+
+	if a.updateCallback != nil {
+		a.updateCallback(content)
+	}
+
+	return nil
+}
+
+// formatToolInput formats tool input for display
+func formatToolInput(method string, params map[string]interface{}) string {
+	// Create a concise summary based on tool type
+	switch method {
+	case "_fs/grep_search":
+		pattern, _ := params["pattern"].(string)
+		path, _ := params["path"].(string)
+		if path == "" {
+			path = "."
+		}
+		return fmt.Sprintf("%s: pattern=%q path=%q", method, pattern, path)
+	case "_fs/list_dirs":
+		path, _ := params["path"].(string)
+		if path == "" {
+			path = "."
+		}
+		recursive, _ := params["recursive"].(bool)
+		return fmt.Sprintf("%s: path=%q recursive=%v", method, path, recursive)
+	default:
+		// Fallback to JSON
+		paramsJSON, _ := json.Marshal(params)
+		return fmt.Sprintf("%s: %s", method, string(paramsJSON))
+	}
+}
+
+// formatToolOutput formats tool output for display
+func formatToolOutput(method string, result interface{}, err error) string {
+	if err != nil {
+		return fmt.Sprintf("%s error: %v", method, err)
+	}
+
+	// Create a concise summary based on tool type
+	switch method {
+	case "_fs/grep_search":
+		if res, ok := result.(map[string]interface{}); ok {
+			matches, _ := res["matches"].([]map[string]interface{})
+			truncated, _ := res["truncated"].(bool)
+			if truncated {
+				return fmt.Sprintf("%s: %d matches (truncated)", method, len(matches))
+			}
+			return fmt.Sprintf("%s: %d matches", method, len(matches))
+		}
+	case "_fs/list_dirs":
+		if res, ok := result.(map[string]interface{}); ok {
+			count, _ := res["count"].(int)
+			truncated, _ := res["truncated"].(bool)
+			if truncated {
+				return fmt.Sprintf("%s: %d entries (truncated)", method, count)
+			}
+			return fmt.Sprintf("%s: %d entries", method, count)
+		}
+	}
+
+	// Fallback to JSON (truncated if too long)
+	resultJSON, _ := json.Marshal(result)
+	summary := string(resultJSON)
+	if len(summary) > 100 {
+		summary = summary[:100] + "..."
+	}
+	return fmt.Sprintf("%s: %s", method, summary)
 }
 
 // GetMessages returns the messages slice (not a copy for efficiency).
