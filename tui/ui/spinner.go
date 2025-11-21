@@ -10,11 +10,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// spinnerChars defines the character set for the spinner animation
+// Includes 0-9, a-f (hex), and special characters for visual variety
+var spinnerChars = []rune{
+	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+	'a', 'b', 'c', 'd', 'e', 'f',
+	'+', '.', '*', '&', '%', '#', '!',
+}
+
 // HexSpinner represents a hexadecimal loading indicator
 type HexSpinner struct {
-	positions [16]int // Each position is an index into the character set
+	positions [16]int  // Each position is an index into the character set
 	frame     int
-	chars     []rune // Character set to randomly choose from
+	chars     []rune   // Character set to randomly choose from
 }
 
 // TickMsg is sent on each spinner animation frame
@@ -22,15 +30,10 @@ type TickMsg time.Time
 
 // NewHexSpinner creates a new hexadecimal spinner
 func NewHexSpinner() HexSpinner {
-	// Character set: 0-9, a-f, and special chars
-	chars := []rune{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-		'a', 'b', 'c', 'd', 'e', 'f',
-		'+', '.', '*', '&', '%', '#', '!'}
-
 	return HexSpinner{
 		positions: [16]int{},
 		frame:     0,
-		chars:     chars,
+		chars:     spinnerChars,
 	}
 }
 

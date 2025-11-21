@@ -1,52 +1,13 @@
 package logger
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/rs/zerolog"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
-
-// LogMessage represents a log message sent to the TUI
-type LogMessage struct {
-	Level   string
-	Message string
-	Time    time.Time
-}
-
-// Logger defines an interface for logging debug messages
-type Logger interface {
-	Debug(format string, args ...interface{})
-	Info(format string, args ...interface{})
-	Error(format string, args ...interface{})
-}
-
-// TUIWriter is a custom io.Writer that sends log messages to a channel (non-blocking)
-type TUIWriter struct {
-	logChan chan<- LogMessage
-}
-
-// NewTUIWriter creates a new TUI writer
-func NewTUIWriter(logChan chan<- LogMessage) *TUIWriter {
-	return &TUIWriter{logChan: logChan}
-}
-
-// Write implements io.Writer interface
-func (w *TUIWriter) Write(p []byte) (n int, err error) {
-	select {
-	case w.logChan <- LogMessage{
-		Message: string(p),
-		Time:    time.Now(),
-	}:
-	default:
-		// Channel full, drop message to avoid blocking
-	}
-	return len(p), nil
-}
 
 // Config contains configuration for the logger
 type Config struct {
@@ -134,35 +95,3 @@ func (z *ZerologAdapter) Info(format string, args ...interface{}) {
 func (z *ZerologAdapter) Error(format string, args ...interface{}) {
 	z.logger.Error().Msgf(format, args...)
 }
-
-// StderrLogger writes log messages to stderr
-type StderrLogger struct{}
-
-// NewStderrLogger creates a new logger that writes to stderr
-func NewStderrLogger() Logger {
-	return &StderrLogger{}
-}
-
-func (l *StderrLogger) Debug(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[DEBUG] "+format+"\n", args...)
-}
-
-func (l *StderrLogger) Info(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[INFO] "+format+"\n", args...)
-}
-
-func (l *StderrLogger) Error(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[ERROR] "+format+"\n", args...)
-}
-
-// NoopLogger is a logger that doesn't output anything
-type NoopLogger struct{}
-
-// NewNoopLogger creates a logger that discards all output
-func NewNoopLogger() Logger {
-	return &NoopLogger{}
-}
-
-func (l *NoopLogger) Debug(format string, args ...interface{}) {}
-func (l *NoopLogger) Info(format string, args ...interface{})  {}
-func (l *NoopLogger) Error(format string, args ...interface{}) {}

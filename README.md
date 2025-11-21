@@ -42,11 +42,9 @@ An Elixir implementation of an AI agent using the Agent Client Protocol (ACP) us
 ## TODO
 ## v0.0.1
 - [ ] Refactor TUI and Elixir code
-- [ ] Remove debuggin info below input
+- [x] Remove debuggin info below input
 - [ ] Add dir list client capability
-- [ ] Copy code scanner prompt
-- [ ] Add git ignore support
-- [ ] Store progress & memories in GUARDASE.md
+- [ ] Copy prompt
 
 ## v0.0.2
 - [ ] Handle reconnection logic. Client should try to reconnect if the server is down. 

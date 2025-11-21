@@ -84,6 +84,7 @@ type JSONRPCMiddleware struct {
 	writer     io.Writer
 	buffer     []byte
 	ctx        context.Context
+	scanner    *bufio.Scanner // Persistent scanner to avoid recreation on each Read
 }
 
 // NewJSONRPCMiddleware creates a new JSON-RPC middleware
@@ -94,6 +95,7 @@ func NewJSONRPCMiddleware(ctx context.Context, reader io.Reader, writer io.Write
 		writer:     writer,
 		ctx:        ctx,
 		buffer:     make([]byte, 0),
+		scanner:    bufio.NewScanner(reader), // Initialize scanner once
 	}
 }
 
@@ -106,16 +108,15 @@ func (m *JSONRPCMiddleware) Read(p []byte) (n int, err error) {
 		return n, nil
 	}
 
-	// Read from underlying reader
-	scanner := bufio.NewScanner(m.underlying)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
+	// Read from underlying reader using persistent scanner
+	if !m.scanner.Scan() {
+		if err := m.scanner.Err(); err != nil {
 			return 0, err
 		}
 		return 0, io.EOF
 	}
 
-	line := scanner.Bytes()
+	line := m.scanner.Bytes()
 
 	// Try to parse as JSON-RPC request
 	var req JSONRPCRequest
@@ -131,7 +132,10 @@ func (m *JSONRPCMiddleware) Read(p []byte) (n int, err error) {
 		// Handle extension method
 		var params map[string]interface{}
 		if len(req.Params) > 0 {
-			json.Unmarshal(req.Params, &params)
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				// Log error but continue with nil params
+				params = nil
+			}
 		}
 
 		result, handlerErr := m.handler.HandleExtensionMethod(m.ctx, req.Method, params)
@@ -151,9 +155,20 @@ func (m *JSONRPCMiddleware) Read(p []byte) (n int, err error) {
 		}
 
 		// Send response directly to writer
-		respBytes, _ := json.Marshal(resp)
+		respBytes, err := json.Marshal(resp)
+		if err != nil {
+			// If we can't marshal the response, send an error response
+			resp.Result = nil
+			resp.Error = map[string]interface{}{
+				"code":    -32603,
+				"message": "Internal error: failed to marshal response",
+			}
+			respBytes, _ = json.Marshal(resp)
+		}
 		respBytes = append(respBytes, '\n')
-		m.writer.Write(respBytes)
+		if _, err := m.writer.Write(respBytes); err != nil {
+			return 0, err
+		}
 
 		// Return empty to continue reading
 		return m.Read(p)

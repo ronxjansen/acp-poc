@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 	"sync"
 
 	"github.com/ron/tui_acp/tui/client"
@@ -32,12 +31,11 @@ type Message struct {
 
 // App manages the business logic for the chat application
 type App struct {
-	mu              sync.RWMutex
-	client          *client.ACPClient
-	messages        []Message
-	currentResponse *strings.Builder
-	logger          logger.Logger
-	updateCallback  func(string)
+	mu             sync.RWMutex
+	client         *client.ACPClient
+	conversation   *ConversationManager
+	logger         logger.Logger
+	updateCallback func(string)
 }
 
 // Config contains configuration for creating an App
@@ -53,10 +51,9 @@ func New(cfg Config) *App {
 	}
 
 	return &App{
-		logger:          cfg.Logger,
-		updateCallback:  cfg.UpdateCallback,
-		messages:        make([]Message, 0),
-		currentResponse: &strings.Builder{},
+		logger:         cfg.Logger,
+		updateCallback: cfg.UpdateCallback,
+		conversation:   NewConversationManager(),
 	}
 }
 
@@ -79,28 +76,9 @@ func (a *App) Connect(ctx context.Context, address string) error {
 	return nil
 }
 
-// flushCurrentResponse adds any pending response to messages (must hold lock)
-func (a *App) flushCurrentResponse() {
-	if a.currentResponse.Len() > 0 {
-		a.messages = append(a.messages, Message{
-			Type:    MessageAssistant,
-			Content: a.currentResponse.String(),
-		})
-		a.currentResponse.Reset()
-	}
-}
-
 // AddUserMessage adds a user message to the conversation without sending it
 func (a *App) AddUserMessage(text string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.flushCurrentResponse()
-
-	a.messages = append(a.messages, Message{
-		Type:    MessageUser,
-		Content: text,
-	})
+	a.conversation.AddUserMessage(text)
 }
 
 // SendPromptToAgent sends a prompt to the agent (without adding to messages)
@@ -118,17 +96,11 @@ func (a *App) SendPromptToAgent(ctx context.Context, text string) error {
 
 // SendMessage sends a user message to the agent
 func (a *App) SendMessage(ctx context.Context, text string) error {
-	a.mu.Lock()
+	a.conversation.AddUserMessage(text)
 
-	a.flushCurrentResponse()
-
-	a.messages = append(a.messages, Message{
-		Type:    MessageUser,
-		Content: text,
-	})
-
+	a.mu.RLock()
 	client := a.client
-	a.mu.Unlock()
+	a.mu.RUnlock()
 
 	if client != nil {
 		return client.SendPrompt(ctx, text)
@@ -139,10 +111,7 @@ func (a *App) SendMessage(ctx context.Context, text string) error {
 
 // OnMessageChunk implements the MessageHandler interface
 func (a *App) OnMessageChunk(ctx context.Context, text string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.currentResponse.WriteString(text)
+	a.conversation.AppendToCurrentResponse(text)
 
 	if a.updateCallback != nil {
 		a.updateCallback(text)
@@ -154,13 +123,8 @@ func (a *App) OnMessageChunk(ctx context.Context, text string) error {
 // OnMessageComplete implements the MessageHandler interface
 // Called when the agent has finished sending a response
 func (a *App) OnMessageComplete(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.conversation.FlushCurrentResponse()
 
-	// Flush the current response to messages
-	a.flushCurrentResponse()
-
-	// Notify the TUI that the message is complete
 	if a.updateCallback != nil {
 		a.updateCallback("")
 	}
@@ -168,32 +132,26 @@ func (a *App) OnMessageComplete(ctx context.Context) error {
 	return nil
 }
 
-// GetMessages returns a copy of all messages
+// GetMessages returns the messages slice (not a copy for efficiency).
+// Callers should not modify the returned slice.
 func (a *App) GetMessages() []Message {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	messages := make([]Message, len(a.messages))
-	copy(messages, a.messages)
-	return messages
+	return a.conversation.GetMessages()
 }
 
 // GetCurrentResponse returns the current incomplete response from the agent
 func (a *App) GetCurrentResponse() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
+	return a.conversation.GetCurrentResponse()
+}
 
-	if a.currentResponse == nil {
-		return ""
-	}
-	return a.currentResponse.String()
+// GetState returns both messages and current response in a single lock acquisition.
+// This is more efficient than calling GetMessages and GetCurrentResponse separately.
+// The returned messages slice should not be modified.
+func (a *App) GetState() (messages []Message, currentResponse string) {
+	return a.conversation.GetState()
 }
 
 // AddMessage adds a message of a specific type to the conversation
 func (a *App) AddMessage(msgType string, content string, data ...interface{}) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	msg := Message{
 		Type:    MessageType(msgType),
 		Content: content,
@@ -203,7 +161,7 @@ func (a *App) AddMessage(msgType string, content string, data ...interface{}) {
 		msg.Data = data[0]
 	}
 
-	a.messages = append(a.messages, msg)
+	a.conversation.AddMessage(msg)
 }
 
 // Close closes the ACP client connection
