@@ -79,10 +79,8 @@ If no address is provided, it defaults to localhost:9090.`,
 		model := ui.NewModel(application, updateChan, serverAddress)
 
 		// Start the Bubble Tea program
-		p := tea.NewProgram(
-			model,
-			tea.WithAltScreen(),
-		)
+		// Using inline mode (no AltScreen) so messages print to stdout with scrollback
+		p := tea.NewProgram(model)
 
 		_, err := p.Run()
 		if err != nil {

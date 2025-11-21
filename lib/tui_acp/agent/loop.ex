@@ -9,6 +9,7 @@ defmodule TuiAcp.Agent.Loop do
   alias TuiAcp.Agent.Tools
 
   @default_max_turns 10
+  # @model "openai:gpt-4o-mini"
   @model "anthropic:claude-haiku-4-5"
 
   @doc """

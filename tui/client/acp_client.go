@@ -18,6 +18,7 @@ import (
 // MessageHandler defines the interface for handling message chunks
 type MessageHandler interface {
 	OnMessageChunk(ctx context.Context, text string) error
+	OnMessageComplete(ctx context.Context) error
 }
 
 // GrepResult represents a single match from a grep search
@@ -158,6 +159,11 @@ func (c *ACPClient) SendPrompt(ctx context.Context, prompt string) error {
 		SessionId: sessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},
 	})
+
+	// Signal that the message is complete
+	if c.handler != nil {
+		c.handler.OnMessageComplete(ctx)
+	}
 
 	return err
 }

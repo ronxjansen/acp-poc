@@ -36,6 +36,7 @@ type Model struct {
 	connecting      bool
 	loading         bool
 	spinner         HexSpinner
+	printedMsgCount int // Track how many messages have been printed to stdout
 }
 
 type acpUpdateMsg struct {
@@ -78,12 +79,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, tea.Quit
 		}
-		return m, waitForUpdate(m.updateChan)
+		// Print welcome header on successful connection
+		header := headerStyle.Render("Weather Agent TUI")
+		separator := separatorStyle.Render("─────────────────────────────────────")
+		welcome := helpStyle.Render("Connected to " + m.address)
+		return m, tea.Batch(
+			tea.Println(header),
+			tea.Println(separator),
+			tea.Println(welcome),
+			tea.Println(""), // blank line
+			waitForUpdate(m.updateChan),
+		)
 
 	case acpUpdateMsg:
-		// Response received - stop loading
-		m.loading = false
-		return m, waitForUpdate(m.updateChan)
+		// Check if there are new messages to print to stdout
+		messages := m.app.GetMessages()
+		var cmds []tea.Cmd
+
+		// Print any new completed messages to stdout
+		for i := m.printedMsgCount; i < len(messages); i++ {
+			rendered := m.messageRenderer.RenderMessage(messages[i])
+			cmds = append(cmds, tea.Println(rendered))
+		}
+		m.printedMsgCount = len(messages)
+
+		// If no current response, we're done loading
+		if m.app.GetCurrentResponse() == "" {
+			m.loading = false
+		}
+
+		cmds = append(cmds, waitForUpdate(m.updateChan))
+		return m, tea.Batch(cmds...)
 
 	case acpErrorMsg:
 		m.err = msg.err
@@ -106,7 +132,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			submitted, userMessage := m.inputBox.Update(msg)
 			if submitted {
 				// Add message to conversation immediately (synchronous)
+				// Note: AddUserMessage flushes any pending assistant response first
 				m.app.AddUserMessage(userMessage)
+
+				// Print ALL new messages (including any flushed assistant response + user message)
+				messages := m.app.GetMessages()
+				var cmds []tea.Cmd
+				for i := m.printedMsgCount; i < len(messages); i++ {
+					rendered := m.messageRenderer.RenderMessage(messages[i])
+					cmds = append(cmds, tea.Println(rendered))
+				}
+				m.printedMsgCount = len(messages)
 
 				// Start loading indicator
 				m.loading = true
@@ -119,8 +155,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}()
 
-				// Return to trigger re-render with the user message now visible and start spinner
-				return m, m.spinner.Init()
+				// Print messages and start spinner
+				cmds = append(cmds, m.spinner.Init())
+				return m, tea.Batch(cmds...)
 			}
 		}
 
@@ -131,17 +168,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the TUI
+// View renders the TUI - only the input area and streaming response
+// Completed messages are printed to stdout via tea.Println for scrollback
 func (m Model) View() string {
-	header := headerStyle.Render("Weather Agent TUI") + "\n"
-	separator := separatorStyle.Render("─────────────────────────────────────") + "\n\n"
-
 	if m.connecting {
-		return header + separator + "Connecting to server...\n"
+		return "Connecting to server...\n"
 	}
 
 	if !m.app.IsConnected() && m.err != nil {
-		return header + separator + tuiErrorStyle.Render(fmt.Sprintf("Failed to connect: %v\nPress Ctrl+C to exit", m.err))
+		return tuiErrorStyle.Render(fmt.Sprintf("Failed to connect: %v\nPress Ctrl+C to exit", m.err))
 	}
 
 	help := helpStyle.Render("Enter: send • Ctrl+C: quit")
@@ -151,21 +186,26 @@ func (m Model) View() string {
 
 	var errorView string
 	if m.err != nil {
-		errorView = tuiErrorStyle.Render(fmt.Sprintf("\nError: %v\n", m.err))
+		errorView = tuiErrorStyle.Render(fmt.Sprintf("Error: %v\n", m.err))
 	}
 
-	// Show loading spinner just above input when waiting for response
+	// Show current streaming response (not yet complete)
+	var streamingView string
+	currentResponse := m.app.GetCurrentResponse()
+	if currentResponse != "" {
+		streamingView = m.messageRenderer.RenderMessage(app.Message{
+			Type:    app.MessageAssistant,
+			Content: currentResponse,
+		}) + "\n"
+	}
+
+	// Show loading spinner when waiting for response
 	var spinnerView string
 	if m.loading {
 		spinnerView = m.spinner.View() + " Processing...\n"
 	}
 
-	// Use MessageRenderer component for rendering conversation
-	messages := m.app.GetMessages()
-	currentResponse := m.app.GetCurrentResponse()
-	conversationView := m.messageRenderer.RenderConversation(messages, currentResponse)
-
-	return header + separator + conversationView + errorView + spinnerView + inputView + "\n" + help
+	return streamingView + errorView + spinnerView + inputView + "\n" + help
 }
 
 // waitForUpdate waits for updates from the app layer

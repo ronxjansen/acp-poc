@@ -151,6 +151,23 @@ func (a *App) OnMessageChunk(ctx context.Context, text string) error {
 	return nil
 }
 
+// OnMessageComplete implements the MessageHandler interface
+// Called when the agent has finished sending a response
+func (a *App) OnMessageComplete(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Flush the current response to messages
+	a.flushCurrentResponse()
+
+	// Notify the TUI that the message is complete
+	if a.updateCallback != nil {
+		a.updateCallback("")
+	}
+
+	return nil
+}
+
 // GetMessages returns a copy of all messages
 func (a *App) GetMessages() []Message {
 	a.mu.RLock()
