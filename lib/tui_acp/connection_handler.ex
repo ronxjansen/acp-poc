@@ -2,13 +2,15 @@ defmodule TuiAcp.ConnectionHandler do
   @moduledoc """
   GenServer that handles a single client connection.
 
-  Uses active socket mode to receive TCP messages and spawns workers
-  for handle_prompt to avoid blocking the GenServer event loop.
+  Uses active socket mode to receive TCP messages and spawns supervised
+  tasks for handle_prompt to avoid blocking the GenServer event loop.
   """
   use GenServer
   require Logger
 
   alias TuiAcp.Agent
+  alias TuiAcp.Protocol.Handler, as: ProtocolHandler
+  alias TuiAcp.Protocol.JsonRpc
 
   defmodule State do
     @moduledoc false
@@ -143,6 +145,23 @@ defmodule TuiAcp.ConnectionHandler do
     {:noreply, %{state | agent_state: new_agent_state}}
   end
 
+  # Handle errors from prompt processing
+  def handle_info({:prompt_error, request_id, error}, state) do
+    Logger.error("Prompt failed for request #{request_id}: #{inspect(error)}")
+
+    error_response = %{
+      "jsonrpc" => "2.0",
+      "id" => request_id,
+      "error" => %{
+        "code" => -32603,
+        "message" => "Prompt processing failed: #{inspect(error)}"
+      }
+    }
+
+    send_json(state.socket, error_response)
+    {:noreply, state}
+  end
+
   # Process different message types
   defp process_message(%{"method" => method} = msg, state)
        when method in ["initialize", "connection/initialize"] do
@@ -183,15 +202,21 @@ defmodule TuiAcp.ConnectionHandler do
     params = msg["params"]
     agent_state = state.agent_state
 
-    spawn(fn ->
-      request = %ACPex.Schema.Session.PromptRequest{
-        session_id: params["sessionId"] || params["session_id"],
-        prompt: params["prompt"]
-      }
+    # Use supervised task for proper error handling and crash reports
+    Task.Supervisor.start_child(TuiAcp.TaskSupervisor, fn ->
+      try do
+        request = %ACPex.Schema.Session.PromptRequest{
+          session_id: params["sessionId"] || params["session_id"],
+          prompt: params["prompt"]
+        }
 
-      {:ok, response, new_agent_state} = Agent.handle_prompt(request, agent_state)
-
-      send(handler_pid, {:prompt_complete, request_id, response, new_agent_state})
+        {:ok, response, new_agent_state} = Agent.handle_prompt(request, agent_state)
+        send(handler_pid, {:prompt_complete, request_id, response, new_agent_state})
+      rescue
+        e ->
+          Logger.error("Prompt processing error: #{inspect(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
+          send(handler_pid, {:prompt_error, request_id, e})
+      end
     end)
 
     state
@@ -239,56 +264,33 @@ defmodule TuiAcp.ConnectionHandler do
     state
   end
 
-  # Helper functions
+  # Helper functions - using shared Protocol modules
 
-  # Extract complete lines from buffer (lines ending with \n)
-  defp extract_lines(buffer) do
-    lines = String.split(buffer, "\n")
-
-    case List.pop_at(lines, -1) do
-      {nil, _} ->
-        # No lines
-        {[], buffer}
-
-      {remaining, complete_lines} when remaining == "" ->
-        # All lines were complete (buffer ended with \n)
-        {complete_lines, ""}
-
-      {remaining, complete_lines} ->
-        # Last part doesn't end with \n, keep it in buffer
-        # Trim empty strings from complete lines
-        complete = Enum.reject(complete_lines, &(&1 == ""))
-        {complete, remaining}
-    end
-  end
+  # Delegate to efficient shared implementation
+  defp extract_lines(buffer), do: ProtocolHandler.extract_lines(buffer)
 
   defp send_response(socket, id, result) do
-    message = %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "result" => result
-    }
-
-    send_json(socket, message)
+    json = JsonRpc.encode_response(id, result)
+    send_raw(socket, json)
   end
 
   defp send_notification(socket, method, params) do
+    # Convert to camelCase for TCP protocol
     camel_params = %{
       "sessionId" => params[:session_id] || params["session_id"],
       "update" => params[:update] || params["update"]
     }
 
-    message = %{
-      "jsonrpc" => "2.0",
-      "method" => method,
-      "params" => camel_params
-    }
-
-    send_json(socket, message)
+    json = JsonRpc.encode_notification(method, camel_params)
+    send_raw(socket, json)
   end
 
   defp send_json(socket, message) do
     json = Jason.encode!(message)
+    send_raw(socket, json)
+  end
+
+  defp send_raw(socket, json) do
     :gen_tcp.send(socket, json <> "\n")
   end
 end

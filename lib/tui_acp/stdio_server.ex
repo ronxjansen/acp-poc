@@ -7,6 +7,7 @@ defmodule TuiAcp.StdioServer do
   require Logger
 
   alias TuiAcp.Agent
+  alias TuiAcp.Protocol.JsonRpc
 
   defstruct [:agent_state, :sessions]
 
@@ -114,9 +115,16 @@ defmodule TuiAcp.StdioServer do
     server = self()
     msg_id = msg["id"]
 
-    spawn(fn ->
-      {:ok, response, new_agent_state} = Agent.handle_prompt(request, state.agent_state)
-      send(server, {:prompt_complete, msg_id, response, new_agent_state})
+    # Use supervised task for proper error handling and crash reports
+    Task.Supervisor.start_child(TuiAcp.TaskSupervisor, fn ->
+      try do
+        {:ok, response, new_agent_state} = Agent.handle_prompt(request, state.agent_state)
+        send(server, {:prompt_complete, msg_id, response, new_agent_state})
+      rescue
+        e ->
+          Logger.error("Prompt processing error: #{inspect(e)}\n#{Exception.format_stacktrace(__STACKTRACE__)}")
+          send(server, {:prompt_error, msg_id, e})
+      end
     end)
 
     {:noreply, state}
@@ -133,40 +141,17 @@ defmodule TuiAcp.StdioServer do
   end
 
   defp send_response(id, result) do
-    message = %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "result" => result
-    }
-
-    send_message(message)
+    json = JsonRpc.encode_response(id, result)
+    IO.puts(json)
   end
 
   defp send_error(id, code, message) do
-    response = %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "error" => %{
-        "code" => code,
-        "message" => message
-      }
-    }
-
-    send_message(response)
+    json = JsonRpc.encode_error(id, code, message)
+    IO.puts(json)
   end
 
   def send_notification(method, params) do
-    message = %{
-      "jsonrpc" => "2.0",
-      "method" => method,
-      "params" => params
-    }
-
-    send_message(message)
-  end
-
-  defp send_message(message) do
-    json = Jason.encode!(message)
+    json = JsonRpc.encode_notification(method, params)
     IO.puts(json)
   end
 end

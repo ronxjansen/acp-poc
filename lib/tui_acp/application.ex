@@ -13,21 +13,26 @@ defmodule TuiAcp.Application do
     server_mode = System.get_env("ACP_SERVER_MODE", "tcp")
     port = System.get_env("ACP_PORT", "9090") |> String.to_integer()
 
-    children =
+    # Task supervisor for async prompt processing (always started)
+    base_children = [
+      {Task.Supervisor, name: TuiAcp.TaskSupervisor}
+    ]
+
+    server_children =
       case server_mode do
         "stdio" ->
           Logger.info("Starting Agent ACP Server (stdio mode)...")
-
           [TuiAcp.StdioServer]
 
         "tcp" ->
           Logger.info("Starting Agent ACP Server (TCP mode)...")
-
           [{TuiAcp.TcpServer, port: port}]
 
         _ ->
           raise "Invalid ACP_SERVER_MODE: #{server_mode}. Use 'tcp' or 'stdio'"
       end
+
+    children = base_children ++ server_children
 
     opts = [strategy: :one_for_one, name: TuiAcp.Supervisor]
     Supervisor.start_link(children, opts)
