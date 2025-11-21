@@ -32,6 +32,8 @@ func (r *ExtensionRouter) HandleExtensionMethod(ctx context.Context, method stri
 	switch method {
 	case "_fs/grep_search":
 		return r.handleGrepSearch(ctx, params)
+	case "_fs/list_dirs":
+		return r.handleListDirs(ctx, params)
 	default:
 		return nil, fmt.Errorf("extension method not supported: %s", method)
 	}
@@ -119,6 +121,71 @@ func (r *ExtensionRouter) formatGrepResults(results []GrepResult, filePattern st
 
 	if truncated {
 		response["message"] = fmt.Sprintf("Results limited to %d matches. Refine your search for more specific results.", maxResults)
+	}
+
+	return response, nil
+}
+
+// handleListDirs handles the _fs/list_dirs extension method
+func (r *ExtensionRouter) handleListDirs(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	r.logger.Info("HandleListDirs called with params: %+v", params)
+
+	// Extract parameters
+	path, _ := params["path"].(string)
+	if path == "" {
+		path = "."
+	}
+
+	recursive, _ := params["recursive"].(bool)
+
+	// Resolve the path relative to working directory
+	resolvedPath := r.fs.ResolvePath(path)
+
+	r.logger.Debug("List dirs: path=%s, recursive=%v", resolvedPath, recursive)
+
+	// Perform the directory listing
+	results, err := r.fs.ListDirectories(ctx, resolvedPath, recursive)
+	if err != nil {
+		r.logger.Error("ListDirectories failed: %v", err)
+		return nil, err
+	}
+
+	// Convert results to the expected format
+	return r.formatListDirsResults(results)
+}
+
+// formatListDirsResults converts DirectoryEntry slice to the expected response format
+func (r *ExtensionRouter) formatListDirsResults(entries []DirectoryEntry) (map[string]interface{}, error) {
+	const maxResults = 100
+
+	formattedEntries := make([]map[string]interface{}, 0, len(entries))
+	truncated := false
+
+	for _, entry := range entries {
+		if len(formattedEntries) >= maxResults {
+			truncated = true
+			break
+		}
+
+		formattedEntries = append(formattedEntries, map[string]interface{}{
+			"path":  entry.Path,
+			"name":  entry.Name,
+			"isDir": entry.IsDir,
+			"size":  entry.Size,
+			"mode":  fmt.Sprintf("%o", entry.Mode.Perm()),
+		})
+	}
+
+	r.logger.Debug("List dirs found %d entries (truncated: %v)", len(formattedEntries), truncated)
+
+	response := map[string]interface{}{
+		"entries": formattedEntries,
+		"count":   len(formattedEntries),
+	}
+
+	if truncated {
+		response["truncated"] = true
+		response["message"] = fmt.Sprintf("Results limited to %d entries.", maxResults)
 	}
 
 	return response, nil

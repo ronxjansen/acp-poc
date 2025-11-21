@@ -90,4 +90,29 @@ defmodule TuiAcp.ClientRequest do
 
   def grep_search(request_callback, opts) when is_list(opts),
     do: grep_search(request_callback, Map.new(opts))
+
+  @doc """
+  Lists files and directories at the specified path.
+
+  Options:
+  - path: Directory path (required)
+  - recursive: Whether to list recursively (optional, defaults to false)
+  """
+  def list_dirs(request_callback, path, recursive \\ false) do
+    params = %{
+      "path" => path,
+      "recursive" => recursive
+    }
+
+    case call(request_callback, "_fs/list_dirs", params) do
+      {:ok, %{"entries" => entries}} ->
+        {:ok, entries}
+
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 end

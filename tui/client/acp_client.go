@@ -84,9 +84,8 @@ func NewACPClient(cfg Config) (*ACPClient, error) {
 	client.protocol = protocol
 
 	// Update filesystem adapter with actual working directory
-	client.fs = NewFileSystemAdapter(protocol.GetCwd(), cfg.Logger)
-	client.capability = NewCapabilityHandler(client.fs, cfg.Handler, cfg.Logger)
-	client.extension = NewExtensionRouter(client.fs, cfg.Logger)
+	// (same instance is shared by capability handler and extension router)
+	client.fs.SetCwd(protocol.GetCwd())
 
 	return client, nil
 }

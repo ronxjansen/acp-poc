@@ -29,6 +29,12 @@ func NewFileSystemAdapter(cwd string, log logger.Logger) *FileSystemAdapter {
 	}
 }
 
+// SetCwd updates the working directory
+func (f *FileSystemAdapter) SetCwd(cwd string) {
+	f.cwd = cwd
+	f.logger.Debug("FileSystemAdapter cwd updated to: %s", cwd)
+}
+
 // ResolvePath resolves a path relative to the working directory
 // If the path is already absolute, it returns it unchanged
 func (f *FileSystemAdapter) ResolvePath(path string) string {

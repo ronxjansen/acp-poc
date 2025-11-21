@@ -68,6 +68,22 @@ defmodule TuiAcp.Agent.Tools.FileSystem do
           ]
         ],
         callback: {__MODULE__, :execute_grep_search, []}
+      ),
+      ReqLLM.Tool.new!(
+        name: "list_dirs",
+        description: "List files and directories at a specified path. Returns information about each entry including name, path, size, and whether it's a directory.",
+        parameter_schema: [
+          path: [
+            type: :string,
+            required: true,
+            doc: "The directory path to list (absolute or relative)"
+          ],
+          recursive: [
+            type: :boolean,
+            doc: "Whether to list recursively (defaults to false)"
+          ]
+        ],
+        callback: {__MODULE__, :execute_list_dirs, []}
       )
     ]
   end
@@ -142,6 +158,29 @@ defmodule TuiAcp.Agent.Tools.FileSystem do
 
         {:error, reason} ->
           {:error, "Failed to perform grep search: #{inspect(reason)}"}
+      end
+    end)
+  end
+
+  @doc """
+  Executes the list_dirs tool.
+
+  Lists files and directories at the specified path via client request.
+  """
+  @spec execute_list_dirs(map()) :: {:ok, map()} | {:error, String.t()}
+  def execute_list_dirs(args) do
+    path = Args.get(args, :path)
+    recursive = Args.get(args, :recursive, false)
+
+    Logger.info("Listing directories: #{path}, recursive: #{recursive}")
+
+    with_client_request(fn request_callback ->
+      case TuiAcp.ClientRequest.list_dirs(request_callback, path, recursive) do
+        {:ok, entries} ->
+          {:ok, %{path: path, recursive: recursive, entries: entries, count: length(entries)}}
+
+        {:error, reason} ->
+          {:error, "Failed to list directories: #{inspect(reason)}"}
       end
     end)
   end
